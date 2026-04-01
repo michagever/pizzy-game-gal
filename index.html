@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pizzy Game Gal</title>
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    #game-container {
+      position: relative;
+      width: 800px;
+      height: 600px;
+    }
+
+    #gameCanvas {
+      display: block;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+
+    #crt-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 10;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 0, 0, 0.08) 2px,
+        rgba(0, 0, 0, 0.08) 4px
+      );
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <div id="crt-overlay"></div>
+  </div>
+
+  <script>
+    // === GAME CLASS ===
+
+    class Game {
+      constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.ctx.imageSmoothingEnabled = false;
+
+        this.state = 'playing';
+        this.lastTime = 0;
+        this.stars = [];
+        this.buildings = [];
+
+        this.canvas.addEventListener('click', e => this._handleClick(e));
+
+        requestAnimationFrame(t => this._loop(t));
+      }
+
+      _loop(timestamp) {
+        const dt = Math.min((timestamp - this.lastTime) / 1000, 0.1);
+        this.lastTime = timestamp;
+        this.update(dt);
+        this.draw();
+        requestAnimationFrame(t => this._loop(t));
+      }
+
+      update(dt) {
+        for (const star of this.stars) star.update(dt);
+        for (const building of this.buildings) building.update(dt);
+      }
+
+      draw() {
+        const ctx = this.ctx;
+        ctx.fillStyle = '#0a0a1a';
+        ctx.fillRect(0, 0, 800, 600);
+        for (const star of this.stars) star.draw(ctx);
+        for (const building of this.buildings) building.draw(ctx);
+      }
+
+      _handleClick(e) {
+        // S02 will fill this
+      }
+    }
+
+    window.addEventListener('load', () => new Game());
+  </script>
+</body>
+</html>
