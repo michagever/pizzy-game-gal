@@ -529,6 +529,7 @@
             if (!ex.isDone() && !ex.isGround && ex.isColliding(m.x, m.y)) {
               m.alive = false;
               this.score += 10;
+              this._spawnDebris(m.x, m.y, 6, ['#ff6644','#ffaa22','#ffffff']);
               break;
             }
           }
