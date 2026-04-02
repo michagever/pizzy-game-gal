@@ -270,7 +270,7 @@
         this.ctx = this.canvas.getContext('2d');
         this.ctx.imageSmoothingEnabled = false;
 
-        this.state = 'playing';
+        this.state = 'start';
         this.lastTime = 0;
         this.stars = [];
         this.buildings = [];
@@ -288,6 +288,13 @@
         this.spawnTimer = 0;
         this.spawnInterval = 2.2;  // instance property (not const) so S03 can mutate per-wave
 
+        // Wave/state-machine properties (T02 will populate logic)
+        this.wave = 0;
+        this.missilesSpawnedThisWave = 0;
+        this.totalMissilesThisWave = 0;
+        this.interludeTimer = 0;
+        this.interludeBonusAwarded = false;
+
         this.canvas.addEventListener('click', e => this._handleClick(e));
 
         requestAnimationFrame(t => this._loop(t));
@@ -302,7 +309,20 @@
       }
 
       update(dt) {
+        // Stars always update in ALL states
         for (const star of this.stars) star.update(dt);
+
+        // Interlude: only tick down timer
+        if (this.state === 'interlude') {
+          this.interludeTimer -= dt;
+          // T02 will add transition logic here
+          return;
+        }
+
+        // Start / game_over: only stars update (already done above)
+        if (this.state !== 'playing') return;
+
+        // === PLAYING STATE: 9-step gameplay pipeline ===
         for (const building of this.buildings) building.update(dt);
 
         // 1. Decay shake
@@ -377,13 +397,34 @@
         } else {
           this.canvas.style.transform = '';
         }
+
+        // 10. Game-over detection: all buildings destroyed
+        if (this.buildings.filter(b => !b.destroyed).length === 0) {
+          this.state = 'game_over';
+          this.canvas.style.transform = '';
+        }
       }
 
       draw() {
         const ctx = this.ctx;
+        // Always draw background and stars in all states
         ctx.fillStyle = '#0a0a1a';
         ctx.fillRect(0, 0, 800, 600);
         for (const star of this.stars) star.draw(ctx);
+
+        if (this.state === 'start') {
+          this._drawStartScreen(ctx);
+          return;
+        }
+
+        if (this.state === 'game_over') {
+          // Draw buildings (destroyed state) beneath overlay
+          for (const building of this.buildings) building.draw(ctx);
+          this._drawGameOverScreen(ctx);
+          return;
+        }
+
+        // === PLAYING and INTERLUDE share the gameplay scene ===
         for (const building of this.buildings) building.draw(ctx);
 
         // Launch base: cyan triangle at (400, 590)
@@ -406,9 +447,29 @@
         ctx.font = '16px monospace';
         ctx.fillText(`SCORE: ${this.score}`, 10, 20);
         ctx.fillText(`BUILDINGS: ${this.buildings.filter(b=>!b.destroyed).length}`, 10, 40);
+
+        if (this.state === 'interlude') {
+          this._drawInterlude(ctx);
+        }
       }
 
       _handleClick(e) {
+        if (this.state === 'start') {
+          this._resetGame();
+          this.state = 'playing';
+          this._startWave(1);
+          return;
+        }
+
+        if (this.state === 'game_over') {
+          this._resetGame();
+          this.state = 'start';
+          return;
+        }
+
+        if (this.state === 'interlude') return; // ignore clicks during interlude
+
+        // state === 'playing' — existing interceptor launch logic
         const activeCount = this.interceptors.filter(i => i.alive).length
                           + this.explosions.filter(ex => !ex.isGround && !ex.isDone()).length;
         if (activeCount >= 3) return;
@@ -416,6 +477,78 @@
         const gx = (e.clientX - rect.left) * (800 / rect.width);
         const gy = (e.clientY - rect.top)  * (600 / rect.height);
         this.interceptors.push(new Interceptor(400, 590, gx, gy));
+      }
+
+      _drawStartScreen(ctx) {
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 40px monospace';
+        ctx.fillText('IRON DOME', 400, 260);
+        ctx.font = '20px monospace';
+        ctx.fillStyle = '#cccccc';
+        ctx.fillText('Click to Start', 400, 310);
+        ctx.restore();
+      }
+
+      _drawGameOverScreen(ctx) {
+        // Semi-transparent dark overlay
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(0, 0, 800, 600);
+        ctx.save();
+        ctx.textAlign = 'center';
+        // Red 'GAME OVER'
+        ctx.fillStyle = '#ff3333';
+        ctx.font = 'bold 48px monospace';
+        ctx.fillText('GAME OVER', 400, 250);
+        // White final score
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '24px monospace';
+        ctx.fillText(`FINAL SCORE: ${this.score}`, 400, 310);
+        // Restart prompt
+        ctx.fillStyle = '#cccccc';
+        ctx.font = '18px monospace';
+        ctx.fillText('Click to Restart', 400, 370);
+        ctx.restore();
+      }
+
+      _drawInterlude(ctx) {
+        // Semi-transparent overlay
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(0, 0, 800, 600);
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 32px monospace';
+        ctx.fillText(`WAVE ${this.wave} COMPLETE`, 400, 260);
+        ctx.font = '20px monospace';
+        ctx.fillStyle = '#cccccc';
+        ctx.fillText('Bonus scoring...', 400, 310);
+        ctx.restore();
+      }
+
+      _startWave(n) {
+        // Stub — T02 will add escalation formulas
+        this.wave = n;
+      }
+
+      _resetGame() {
+        this.buildings = [];
+        this._initBuildings();
+        this.score = 0;
+        this.interceptors = [];
+        this.missiles = [];
+        this.explosions = [];
+        this.particles = [];
+        this.spawnTimer = 0;
+        this.shakeTimer = 0;
+        this.shakeMag = 0;
+        this.wave = 0;
+        this.missilesSpawnedThisWave = 0;
+        this.totalMissilesThisWave = 0;
+        this.interludeTimer = 0;
+        this.interludeBonusAwarded = false;
+        this.canvas.style.transform = '';
       }
 
       _spawnMissile() {
