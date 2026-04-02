@@ -294,6 +294,7 @@
         this.totalMissilesThisWave = 0;
         this.interludeTimer = 0;
         this.interludeBonusAwarded = false;
+        this.interludeBonus = 0;
 
         this.canvas.addEventListener('click', e => this._handleClick(e));
 
@@ -312,10 +313,18 @@
         // Stars always update in ALL states
         for (const star of this.stars) star.update(dt);
 
-        // Interlude: only tick down timer
+        // Interlude: count down timer, let explosions/particles clean up visually
         if (this.state === 'interlude') {
           this.interludeTimer -= dt;
-          // T02 will add transition logic here
+          // Clean up lingering visual effects from previous wave
+          for (const ex of this.explosions) ex.update(dt);
+          this.explosions = this.explosions.filter(ex => !ex.isDone());
+          for (const p of this.particles) p.update(dt);
+          this.particles = this.particles.filter(p => !p.isDead());
+          if (this.interludeTimer <= 0) {
+            this.state = 'playing';
+            this._startWave(this.wave + 1);
+          }
           return;
         }
 
@@ -338,9 +347,9 @@
         }
         this.interceptors = this.interceptors.filter(i => i.alive);
 
-        // 3. Missile spawner
+        // 3. Missile spawner (wave-aware: stop after quota)
         this.spawnTimer += dt;
-        if (this.spawnTimer >= this.spawnInterval) {
+        if (this.spawnTimer >= this.spawnInterval && this.missilesSpawnedThisWave < this.totalMissilesThisWave) {
           this.spawnTimer = 0;
           this._spawnMissile();
         }
@@ -386,7 +395,10 @@
         for (const p of this.particles) p.update(dt);
         this.particles = this.particles.filter(p => !p.isDead());
 
-        // 8. Filter dead missiles
+        // 8. Filter dead missiles (including off-screen)
+        for (const m of this.missiles) {
+          if (m.y > 620 || m.y < -20 || m.x < -20 || m.x > 820) m.alive = false;
+        }
         this.missiles = this.missiles.filter(m => m.alive);
 
         // 9. Screen shake transform (CSS transform — NOT ctx.translate)
@@ -398,10 +410,16 @@
           this.canvas.style.transform = '';
         }
 
-        // 10. Game-over detection: all buildings destroyed
+        // 10. Game-over detection FIRST: all buildings destroyed
         if (this.buildings.filter(b => !b.destroyed).length === 0) {
           this.state = 'game_over';
           this.canvas.style.transform = '';
+          return;
+        }
+
+        // 11. Wave-completion detection: all spawned AND no alive missiles remain
+        if (this.missilesSpawnedThisWave >= this.totalMissilesThisWave && this.missiles.length === 0 && this.state === 'playing') {
+          this._endWave();
         }
       }
 
@@ -447,6 +465,7 @@
         ctx.font = '16px monospace';
         ctx.fillText(`SCORE: ${this.score}`, 10, 20);
         ctx.fillText(`BUILDINGS: ${this.buildings.filter(b=>!b.destroyed).length}`, 10, 40);
+        ctx.fillText(`WAVE: ${this.wave}`, 680, 20);
 
         if (this.state === 'interlude') {
           this._drawInterlude(ctx);
@@ -518,18 +537,35 @@
         ctx.fillRect(0, 0, 800, 600);
         ctx.save();
         ctx.textAlign = 'center';
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 32px monospace';
-        ctx.fillText(`WAVE ${this.wave} COMPLETE`, 400, 260);
-        ctx.font = '20px monospace';
+        ctx.fillStyle = '#00ff88';
+        ctx.font = 'bold 36px monospace';
+        ctx.fillText(`WAVE ${this.wave} COMPLETE`, 400, 240);
+        if (this.interludeBonusAwarded && this.interludeBonus > 0) {
+          ctx.fillStyle = '#ffdd44';
+          ctx.font = 'bold 24px monospace';
+          ctx.fillText(`+${this.interludeBonus} BUILDING BONUS`, 400, 290);
+        }
         ctx.fillStyle = '#cccccc';
-        ctx.fillText('Bonus scoring...', 400, 310);
+        ctx.font = '18px monospace';
+        ctx.fillText(`Next wave in ${Math.ceil(this.interludeTimer)}...`, 400, 340);
         ctx.restore();
       }
 
       _startWave(n) {
-        // Stub — T02 will add escalation formulas
         this.wave = n;
+        this.totalMissilesThisWave = 3 + n * 2;       // wave 1 = 5, wave 5 = 13
+        this.missilesSpawnedThisWave = 0;
+        this.spawnInterval = Math.max(0.6, 2.2 - n * 0.2); // wave 1 = 2.0s, wave 5 = 1.2s
+        this.spawnTimer = 0;
+      }
+
+      _endWave() {
+        this.state = 'interlude';
+        this.interludeTimer = 2.5;
+        const alive = this.buildings.filter(b => !b.destroyed).length;
+        this.interludeBonus = alive * 100;
+        this.score += this.interludeBonus;
+        this.interludeBonusAwarded = true;
       }
 
       _resetGame() {
@@ -548,6 +584,7 @@
         this.totalMissilesThisWave = 0;
         this.interludeTimer = 0;
         this.interludeBonusAwarded = false;
+        this.interludeBonus = 0;
         this.canvas.style.transform = '';
       }
 
@@ -557,8 +594,9 @@
         const target = alive.length > 0 ? alive[Math.floor(Math.random() * alive.length)] : null;
         const tx = target ? target.x + target.width/2 : Math.random()*800;
         const ty = target ? target.y + target.height/2 : 590;
-        const speed = 80 + Math.random() * 40;  // 80-120 px/s for wave 1
+        const speed = (80 + Math.random() * 40) * (1 + this.wave * 0.12);
         this.missiles.push(new Missile(sx, 0, tx, ty, speed));
+        this.missilesSpawnedThisWave++;
       }
 
       _spawnDebris(cx, cy, count, colors) {
