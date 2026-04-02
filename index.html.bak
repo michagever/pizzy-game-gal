@@ -1,0 +1,1253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Pizzy Game Gal</title>
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      overflow: hidden;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    #game-container {
+      position: relative;
+      width: 800px;
+      height: 600px;
+      max-width: 100vw;
+      max-height: 100vh;
+      aspect-ratio: 4 / 3;
+    }
+
+    #gameCanvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+
+    #crt-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 10;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 0, 0, 0.08) 2px,
+        rgba(0, 0, 0, 0.08) 4px
+      );
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <div id="crt-overlay"></div>
+  </div>
+
+  <script>
+    // === STAR CLASS ===
+
+    class Star {
+      constructor(canvas) {
+        this.x = Math.random() * canvas.width;
+        this.y = Math.random() * (canvas.height * 0.8);
+        this.size = Math.random() < 0.3 ? 2 : 1;
+        this.phase = Math.random() * Math.PI * 2;
+        this.speed = 0.5 + Math.random() * 1.5;
+        this.isBright = Math.random() < 0.035;
+        if (this.isBright) {
+          this.size = 1;
+          this.sparkleSize = 3 + Math.floor(Math.random() * 3);
+        }
+      }
+
+      update(dt) {
+        this.phase += this.speed * dt;
+      }
+
+      draw(ctx) {
+        const alpha = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(this.phase));
+        if (this.isBright) {
+          const s = this.sparkleSize;
+          ctx.fillStyle = `rgba(180,200,255,${(alpha * 0.6).toFixed(2)})`;
+          ctx.fillRect(this.x - Math.floor(s / 2), this.y, s, 1);
+          ctx.fillRect(this.x, this.y - Math.floor(s / 2), 1, s);
+          ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
+          ctx.fillRect(this.x, this.y, 1, 1);
+        } else {
+          ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
+          ctx.fillRect(this.x, this.y, this.size, this.size);
+        }
+      }
+    }
+
+    // === BUILDING CLASS ===
+
+    class Building {
+      constructor(x, y, width, height) {
+        this.x = x;
+        this.y = y;
+        this.width = width;
+        this.height = height;
+        this.destroyed = false;
+        this.windowFlicker = [];
+        const winW = 8, winH = 6;
+        const cols = 2;
+        const rows = Math.max(2, Math.floor(this.height / 22));
+        const padX = Math.floor((this.width - cols * winW) / (cols + 1));
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const wx = padX + c * (winW + padX);
+            const wy = 10 + r * 18;
+            if (wy + winH < this.height - 4) {
+              this.windowFlicker.push({
+                rx: wx, ry: wy,
+                lit: Math.random() < 0.3,
+                timer: Math.random() * 5,
+                interval: 3 + Math.random() * 8
+              });
+            }
+          }
+        }
+      }
+
+      destroy() {
+        this.destroyed = true;
+      }
+
+      getBounds() {
+        return { x: this.x, y: this.y, width: this.width, height: this.height };
+      }
+
+      update(dt) {
+        if (this.destroyed) return;
+        for (const w of this.windowFlicker) {
+          w.timer += dt;
+          if (w.timer >= w.interval) {
+            w.timer = 0;
+            w.lit = !w.lit;
+            w.interval = 3 + Math.random() * 8;
+          }
+        }
+      }
+
+      draw(ctx) {
+        if (this.destroyed) return;
+
+        // Building body with depth
+        ctx.fillStyle = '#006880';
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+        // Left edge highlight
+        ctx.fillStyle = '#008aa0';
+        ctx.fillRect(this.x, this.y, 3, this.height);
+        // Right edge shadow
+        ctx.fillStyle = '#004455';
+        ctx.fillRect(this.x + this.width - 3, this.y, 3, this.height);
+
+        // Rooftop accent
+        ctx.fillStyle = '#00c8e0';
+        ctx.fillRect(this.x, this.y, this.width, 4);
+        ctx.fillRect(this.x + this.width / 2 - 4, this.y - 4, 8, 4);
+
+        // Antenna
+        ctx.fillStyle = '#00c8e0';
+        ctx.fillRect(this.x + this.width / 2, this.y - 10, 2, 10);
+        ctx.fillRect(this.x + this.width / 2 - 2, this.y - 10, 6, 2);
+
+        // Windows with flicker
+        const winW = 8, winH = 6;
+        for (const w of this.windowFlicker) {
+          if (w.lit) {
+            ctx.save();
+            ctx.globalAlpha = 0.15;
+            ctx.fillStyle = '#ffdd44';
+            ctx.fillRect(this.x + w.rx - 1, this.y + w.ry - 1, winW + 2, winH + 2);
+            ctx.restore();
+            ctx.fillStyle = '#ffdd44';
+            ctx.fillRect(this.x + w.rx, this.y + w.ry, winW, winH);
+          } else {
+            ctx.fillStyle = '#002233';
+            ctx.fillRect(this.x + w.rx, this.y + w.ry, winW, winH);
+          }
+        }
+      }
+    }
+
+    // === MISSILE CLASS ===
+
+    class Missile {
+      constructor(x, y, tx, ty, speed) {
+        this.x = x; this.y = y;
+        const dist = Math.hypot(tx - x, ty - y);
+        this.vx = (tx - x) / dist * speed;
+        this.vy = (ty - y) / dist * speed;
+        this.trail = [];
+        this.alive = true;
+        this.glowPhase = Math.random() * Math.PI * 2;
+      }
+      update(dt) {
+        this.trail.push({x: this.x, y: this.y});
+        if (this.trail.length > 14) this.trail.shift();
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.glowPhase += 8 * dt;
+      }
+      draw(ctx) {
+        const angle = Math.atan2(this.vy, this.vx);
+
+        // Trail glow layer (wider, dim)
+        for (let i = 0; i < this.trail.length; i++) {
+          const p = this.trail[i];
+          const t = (i + 1) / this.trail.length;
+          ctx.save();
+          ctx.globalAlpha = t * 0.12;
+          ctx.fillStyle = '#ff4400';
+          ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
+          ctx.restore();
+          // Sharp trail
+          ctx.fillStyle = `rgba(255,${40 + Math.floor(60 * t)},${20 + Math.floor(20 * t)},${(t * 0.8).toFixed(2)})`;
+          ctx.fillRect(p.x - 1, p.y - 1, 3, 3);
+        }
+
+        // Missile body (rotated)
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(angle);
+
+        // Warhead glow (pulsing)
+        const glowSize = 6 + 2 * Math.sin(this.glowPhase);
+        ctx.save();
+        ctx.globalAlpha = 0.25 + 0.1 * Math.sin(this.glowPhase);
+        const grd = ctx.createRadialGradient(4, 0, 0, 4, 0, glowSize);
+        grd.addColorStop(0, '#ff6600');
+        grd.addColorStop(1, 'rgba(255,50,0,0)');
+        ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.arc(4, 0, glowSize, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Main body
+        ctx.fillStyle = '#881111';
+        ctx.fillRect(-6, -2, 12, 4);
+        ctx.fillStyle = '#661111';
+        ctx.fillRect(-6, -1, 12, 2);
+
+        // Warhead tip
+        ctx.fillStyle = '#cc2200';
+        ctx.beginPath();
+        ctx.moveTo(6, -2);
+        ctx.lineTo(10, 0);
+        ctx.lineTo(6, 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#ff4400';
+        ctx.beginPath();
+        ctx.moveTo(7, -1);
+        ctx.lineTo(9, 0);
+        ctx.lineTo(7, 1);
+        ctx.closePath();
+        ctx.fill();
+
+        // Tail fins
+        ctx.fillStyle = '#993333';
+        ctx.beginPath();
+        ctx.moveTo(-6, -2); ctx.lineTo(-9, -5); ctx.lineTo(-4, -2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(-6, 2); ctx.lineTo(-9, 5); ctx.lineTo(-4, 2);
+        ctx.closePath();
+        ctx.fill();
+
+        // Engine exhaust flicker
+        ctx.save();
+        ctx.globalAlpha = 0.5 + 0.3 * Math.sin(this.glowPhase * 2);
+        ctx.fillStyle = '#ff8800';
+        ctx.fillRect(-8, -1, 3, 2);
+        ctx.restore();
+
+        ctx.restore();
+      }
+    }
+
+    // === INTERCEPTOR CLASS ===
+
+    class Interceptor {
+      constructor(x, y, tx, ty) {
+        this.x = x; this.y = y;
+        this.tx = tx; this.ty = ty;
+        this.speed = 350;
+        this.trail = [];
+        this.alive = true;
+        this.enginePhase = 0;
+      }
+      update(dt) {
+        this.trail.push({x: this.x, y: this.y});
+        if (this.trail.length > 16) this.trail.shift();
+        this.enginePhase += 12 * dt;
+        const dist = Math.hypot(this.tx - this.x, this.ty - this.y);
+        if (dist < this.speed * dt) {
+          this.alive = false;
+          return {detonated: true, cx: this.tx, cy: this.ty};
+        }
+        this.x += (this.tx - this.x) / dist * this.speed * dt;
+        this.y += (this.ty - this.y) / dist * this.speed * dt;
+        return {detonated: false};
+      }
+      draw(ctx) {
+        const a = Math.atan2(this.ty - this.y, this.tx - this.x);
+
+        // Smoke trail (wider, fading)
+        for (let i = 0; i < this.trail.length; i++) {
+          const p = this.trail[i];
+          const t = (i + 1) / this.trail.length;
+          // Glow layer
+          ctx.save();
+          ctx.globalAlpha = t * 0.1;
+          ctx.fillStyle = '#4488ff';
+          ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
+          ctx.restore();
+          // Smoke puff
+          ctx.save();
+          ctx.globalAlpha = (1 - t) * 0.35;
+          ctx.fillStyle = '#99aabb';
+          const s = 2 + (1 - t) * 3;
+          ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s);
+          ctx.restore();
+          // Sharp core trail
+          ctx.fillStyle = i % 2 === 0
+            ? `rgba(100,180,255,${(t * 0.9).toFixed(2)})`
+            : `rgba(255,240,100,${(t * 0.7).toFixed(2)})`;
+          ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
+        }
+
+        // Interceptor body (rotated)
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(a);
+
+        // Engine exhaust glow
+        const exSize = 8 + 3 * Math.sin(this.enginePhase);
+        ctx.save();
+        ctx.globalAlpha = 0.3 + 0.15 * Math.sin(this.enginePhase);
+        const grd = ctx.createRadialGradient(-6, 0, 0, -6, 0, exSize);
+        grd.addColorStop(0, '#66aaff');
+        grd.addColorStop(0.5, '#3366ff');
+        grd.addColorStop(1, 'rgba(50,100,255,0)');
+        ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.arc(-6, 0, exSize, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Main body (sleek white/blue)
+        ctx.fillStyle = '#ddeeff';
+        ctx.fillRect(-5, -1.5, 10, 3);
+        ctx.fillStyle = '#4488ff';
+        ctx.fillRect(-5, -0.5, 10, 1);
+
+        // Nose cone
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.moveTo(5, -1.5); ctx.lineTo(8, 0); ctx.lineTo(5, 1.5);
+        ctx.closePath();
+        ctx.fill();
+
+        // Fins
+        ctx.fillStyle = '#88aacc';
+        ctx.beginPath();
+        ctx.moveTo(-5, -1.5); ctx.lineTo(-7, -4); ctx.lineTo(-3, -1.5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(-5, 1.5); ctx.lineTo(-7, 4); ctx.lineTo(-3, 1.5);
+        ctx.closePath();
+        ctx.fill();
+
+        // Engine flame
+        ctx.save();
+        ctx.globalAlpha = 0.7 + 0.3 * Math.sin(this.enginePhase * 2);
+        ctx.fillStyle = '#88ccff';
+        ctx.fillRect(-8, -1, 3, 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(-7, -0.5, 2, 1);
+        ctx.restore();
+
+        ctx.restore();
+      }
+    }
+
+    // === EXPLOSION CLASS ===
+
+    class Explosion {
+      constructor(cx, cy, maxRadius, duration, isGround) {
+        this.cx = cx; this.cy = cy;
+        this.maxRadius = maxRadius;
+        this.duration = duration;
+        this.timer = 0;
+        this.isGround = isGround;
+        this.shockwaveRadius = 0;
+        this.shockwaveMax = maxRadius * 1.6;
+        this.blocks = [];
+        for (let i = 0; i < 20; i++) {
+          this.blocks.push({
+            angle: Math.random() * Math.PI * 2,
+            dist: Math.random(),
+            size: 3 + Math.random() * 5,
+            color: Math.random()
+          });
+        }
+      }
+      get radius() {
+        return this.maxRadius * Math.min(this.timer / (this.duration * 0.4), 1);
+      }
+      get alpha() {
+        return Math.max(0, 1 - this.timer / this.duration);
+      }
+      isColliding(x, y) {
+        return Math.hypot(x - this.cx, y - this.cy) <= this.radius;
+      }
+      isDone() { return this.timer >= this.duration; }
+      update(dt) {
+        this.timer += dt;
+        this.shockwaveRadius = Math.min(this.shockwaveMax, this.shockwaveRadius + this.shockwaveMax * dt * 2.5);
+      }
+      draw(ctx) {
+        if (this.alpha <= 0) return;
+        const r = this.radius;
+        ctx.save();
+
+        // Shockwave ring
+        const swAlpha = Math.max(0, 1 - this.shockwaveRadius / this.shockwaveMax) * 0.5;
+        if (swAlpha > 0.01) {
+          ctx.save();
+          ctx.globalAlpha = swAlpha;
+          ctx.strokeStyle = this.isGround ? '#ff8800' : '#aaddff';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(this.cx, this.cy, this.shockwaveRadius, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        ctx.globalAlpha = this.alpha;
+
+        // Outer layer: orange/red gradient
+        const grad1 = ctx.createRadialGradient(this.cx, this.cy, r * 0.6, this.cx, this.cy, r);
+        grad1.addColorStop(0, this.isGround ? 'rgba(255,120,0,0.5)' : 'rgba(255,200,50,0.4)');
+        grad1.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad1;
+        ctx.beginPath();
+        ctx.arc(this.cx, this.cy, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Mid layer: yellow
+        const grad2 = ctx.createRadialGradient(this.cx, this.cy, 0, this.cx, this.cy, r * 0.6);
+        grad2.addColorStop(0, this.isGround ? 'rgba(255,200,0,0.7)' : 'rgba(255,255,150,0.6)');
+        grad2.addColorStop(1, 'rgba(255,150,0,0)');
+        ctx.fillStyle = grad2;
+        ctx.beginPath();
+        ctx.arc(this.cx, this.cy, r * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+
+        // White-hot core (fades quickly)
+        if (this.timer < this.duration * 0.3) {
+          const coreAlpha = 1 - this.timer / (this.duration * 0.3);
+          ctx.save();
+          ctx.globalAlpha = coreAlpha * this.alpha;
+          const grad3 = ctx.createRadialGradient(this.cx, this.cy, 0, this.cx, this.cy, r * 0.3);
+          grad3.addColorStop(0, 'rgba(255,255,255,0.9)');
+          grad3.addColorStop(1, 'rgba(255,255,200,0)');
+          ctx.fillStyle = grad3;
+          ctx.beginPath();
+          ctx.arc(this.cx, this.cy, r * 0.3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+
+        // Blocky pixel debris inside explosion
+        for (const b of this.blocks) {
+          const bx = this.cx + Math.cos(b.angle) * b.dist * r;
+          const by = this.cy + Math.sin(b.angle) * b.dist * r;
+          let c;
+          if (b.color < 0.3) c = this.isGround ? '#ff4400' : '#ffff88';
+          else if (b.color < 0.6) c = this.isGround ? '#ff8800' : '#ffdd44';
+          else c = this.isGround ? '#ffcc00' : '#ffffff';
+          ctx.fillStyle = c;
+          ctx.fillRect(Math.floor(bx), Math.floor(by), Math.floor(b.size), Math.floor(b.size));
+        }
+
+        // Outer ring
+        ctx.strokeStyle = this.isGround ? '#ff5500' : '#ffff44';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(this.cx, this.cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.restore();
+      }
+    }
+
+    // === PARTICLE CLASS ===
+
+    class Particle {
+      constructor(x, y, vx, vy, color, life, size) {
+        this.x = x; this.y = y;
+        this.vx = vx; this.vy = vy;
+        this.color = color;
+        this.life = life;
+        this.maxLife = life;
+        this.size = size || 2;
+        this.gravity = 150;
+      }
+      isDead() { return this.life <= 0; }
+      update(dt) {
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.vy += this.gravity * dt;
+        this.life -= dt;
+      }
+      draw(ctx) {
+        if (this.life <= 0) return;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, this.life / this.maxLife);
+        ctx.fillStyle = this.color;
+        const s = this.size;
+        ctx.fillRect(this.x - s / 2, this.y - s / 2, s, s);
+        ctx.restore();
+      }
+    }
+
+    // === SOUND ENGINE CLASS ===
+
+    class SoundEngine {
+      constructor() {
+        this.ctx = null;
+      }
+
+      _ensureContext() {
+        if (!this.ctx) {
+          this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+        return this.ctx;
+      }
+
+      playLaunch() {
+        const ctx = this._ensureContext();
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(300, now);
+        osc.frequency.linearRampToValueAtTime(600, now + 0.1);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.linearRampToValueAtTime(0.001, now + 0.12);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.12);
+        osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+      }
+
+      playExplosion() {
+        const ctx = this._ensureContext();
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(400, now);
+        osc.frequency.linearRampToValueAtTime(80, now + 0.3);
+        gain.gain.setValueAtTime(0.4, now);
+        gain.gain.linearRampToValueAtTime(0.001, now + 0.35);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.35);
+        osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+      }
+
+      playBuildingHit() {
+        const ctx = this._ensureContext();
+        const now = ctx.currentTime;
+        // Rumble oscillator (low sawtooth sweep)
+        const osc1 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        osc1.type = 'sawtooth';
+        osc1.frequency.setValueAtTime(150, now);
+        osc1.frequency.linearRampToValueAtTime(40, now + 0.4);
+        gain1.gain.setValueAtTime(0.5, now);
+        gain1.gain.linearRampToValueAtTime(0.001, now + 0.45);
+        osc1.connect(gain1);
+        gain1.connect(ctx.destination);
+        osc1.start(now);
+        osc1.stop(now + 0.45);
+        osc1.onended = () => { osc1.disconnect(); gain1.disconnect(); };
+        // Noise-like crunch (square wave with rapid frequency modulation)
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.type = 'square';
+        osc2.frequency.setValueAtTime(200, now);
+        osc2.frequency.linearRampToValueAtTime(80, now + 0.05);
+        osc2.frequency.setValueAtTime(300, now + 0.05);
+        osc2.frequency.linearRampToValueAtTime(50, now + 0.15);
+        osc2.frequency.setValueAtTime(180, now + 0.15);
+        osc2.frequency.linearRampToValueAtTime(30, now + 0.35);
+        gain2.gain.setValueAtTime(0.35, now);
+        gain2.gain.linearRampToValueAtTime(0.001, now + 0.45);
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.start(now);
+        osc2.stop(now + 0.45);
+        osc2.onended = () => { osc2.disconnect(); gain2.disconnect(); };
+      }
+
+      playWaveComplete() {
+        const ctx = this._ensureContext();
+        const now = ctx.currentTime;
+        // First note: 400Hz for 0.12s
+        const osc1 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        osc1.type = 'square';
+        osc1.frequency.setValueAtTime(400, now);
+        gain1.gain.setValueAtTime(0.25, now);
+        gain1.gain.linearRampToValueAtTime(0.001, now + 0.12);
+        osc1.connect(gain1);
+        gain1.connect(ctx.destination);
+        osc1.start(now);
+        osc1.stop(now + 0.12);
+        osc1.onended = () => { osc1.disconnect(); gain1.disconnect(); };
+        // Second note: 600Hz for 0.15s, starts after first
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.type = 'square';
+        osc2.frequency.setValueAtTime(600, now + 0.12);
+        gain2.gain.setValueAtTime(0.001, now);
+        gain2.gain.setValueAtTime(0.25, now + 0.12);
+        gain2.gain.linearRampToValueAtTime(0.001, now + 0.27);
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.start(now + 0.12);
+        osc2.stop(now + 0.27);
+        osc2.onended = () => { osc2.disconnect(); gain2.disconnect(); };
+      }
+
+      playGameOver() {
+        const ctx = this._ensureContext();
+        const now = ctx.currentTime;
+        const notes = [500, 400, 250];
+        const noteDur = 0.2;
+        const gap = 0.05;
+        notes.forEach((freq, i) => {
+          const start = now + i * (noteDur + gap);
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'square';
+          osc.frequency.setValueAtTime(freq, start);
+          gain.gain.setValueAtTime(0.001, now);
+          gain.gain.setValueAtTime(0.3, start);
+          gain.gain.linearRampToValueAtTime(0.001, start + noteDur);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(start);
+          osc.stop(start + noteDur);
+          osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+        });
+      }
+    }
+
+    // === GAME CLASS ===
+
+    class Game {
+      constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.ctx.imageSmoothingEnabled = false;
+
+        this.state = 'start';
+        this.lastTime = 0;
+        this.stars = [];
+        this.buildings = [];
+
+        this._initStars();
+        this._initBuildings();
+
+        this.score = 0;
+        this.interceptors = [];
+        this.missiles = [];
+        this.explosions = [];
+        this.particles = [];
+        this.shakeTimer = 0;
+        this.shakeMag = 0;
+        this.spawnTimer = 0;
+        this.spawnInterval = 2.2;  // instance property (not const) so S03 can mutate per-wave
+
+        // Wave/state-machine properties (T02 will populate logic)
+        this.wave = 0;
+        this.missilesSpawnedThisWave = 0;
+        this.totalMissilesThisWave = 0;
+        this.interludeTimer = 0;
+        this.interludeBonusAwarded = false;
+        this.interludeBonus = 0;
+
+        this.sound = new SoundEngine();
+
+        this.mouseX = 400;
+        this.mouseY = 300;
+        this.flashTimer = 0;
+
+        this.canvas.addEventListener('click', e => this._handleClick(e));
+        this.canvas.addEventListener('mousemove', e => {
+          const rect = this.canvas.getBoundingClientRect();
+          this.mouseX = (e.clientX - rect.left) * (800 / rect.width);
+          this.mouseY = (e.clientY - rect.top) * (600 / rect.height);
+        });
+
+        // Touch support
+        this.canvas.addEventListener('touchstart', e => {
+          e.preventDefault();
+          const touch = e.changedTouches[0];
+          const rect = this.canvas.getBoundingClientRect();
+          this.mouseX = (touch.clientX - rect.left) * (800 / rect.width);
+          this.mouseY = (touch.clientY - rect.top) * (600 / rect.height);
+          this._handleClick({ clientX: touch.clientX, clientY: touch.clientY });
+        }, { passive: false });
+        this.canvas.addEventListener('touchmove', e => {
+          e.preventDefault();
+          const touch = e.changedTouches[0];
+          const rect = this.canvas.getBoundingClientRect();
+          this.mouseX = (touch.clientX - rect.left) * (800 / rect.width);
+          this.mouseY = (touch.clientY - rect.top) * (600 / rect.height);
+        }, { passive: false });
+
+        this._resizeContainer();
+        window.addEventListener('resize', () => this._resizeContainer());
+
+        requestAnimationFrame(t => this._loop(t));
+      }
+
+      _loop(timestamp) {
+        const dt = Math.min((timestamp - this.lastTime) / 1000, 0.1);
+        this.lastTime = timestamp;
+        this.update(dt);
+        this.draw();
+        requestAnimationFrame(t => this._loop(t));
+      }
+
+      update(dt) {
+        // Stars always update in ALL states
+        for (const star of this.stars) star.update(dt);
+
+        // Interlude: count down timer, let explosions/particles clean up visually
+        if (this.state === 'interlude') {
+          this.interludeTimer -= dt;
+          // Clean up lingering visual effects from previous wave
+          for (const ex of this.explosions) ex.update(dt);
+          this.explosions = this.explosions.filter(ex => !ex.isDone());
+          for (const p of this.particles) p.update(dt);
+          this.particles = this.particles.filter(p => !p.isDead());
+          if (this.interludeTimer <= 0) {
+            this.state = 'playing';
+            this._startWave(this.wave + 1);
+          }
+          return;
+        }
+
+        // Start / game_over: only stars update (already done above)
+        if (this.state !== 'playing') return;
+
+        // === PLAYING STATE: 9-step gameplay pipeline ===
+        for (const building of this.buildings) building.update(dt);
+
+        // 1. Decay shake and flash
+        this.shakeTimer = Math.max(0, this.shakeTimer - dt);
+        this.flashTimer = Math.max(0, this.flashTimer - dt);
+
+        // 2. Update interceptors, collect detonations
+        for (const ic of this.interceptors) {
+          if (!ic.alive) continue;
+          const result = ic.update(dt);
+          if (result.detonated) {
+            this.explosions.push(new Explosion(result.cx, result.cy, 60, 1.8, false));
+            this._spawnSparks(result.cx, result.cy, 8);
+            this.flashTimer = 0.06;
+            this.sound.playExplosion();
+          }
+        }
+        this.interceptors = this.interceptors.filter(i => i.alive);
+
+        // 3. Missile spawner (wave-aware: stop after quota)
+        this.spawnTimer += dt;
+        if (this.spawnTimer >= this.spawnInterval && this.missilesSpawnedThisWave < this.totalMissilesThisWave) {
+          this.spawnTimer = 0;
+          this._spawnMissile();
+        }
+
+        // 4. Update missiles
+        for (const m of this.missiles) m.update(dt);
+
+        // 4b. Direct-hit detection: interceptor physically hits a missile
+        for (const ic of this.interceptors) {
+          if (!ic.alive) continue;
+          for (const m of this.missiles) {
+            if (!m.alive) continue;
+            if (Math.hypot(ic.x - m.x, ic.y - m.y) < 14) {
+              ic.alive = false;
+              m.alive = false;
+              this.score += 25;
+              // Large special explosion
+              this.explosions.push(new Explosion(m.x, m.y, 90, 2.2, false));
+              this._spawnDebris(m.x, m.y, 24, ['#ffffff','#ffff44','#ff8800','#88ccff']);
+              this._spawnSparks(m.x, m.y, 14);
+              this._spawnEmbers(m.x, m.y, 8);
+              this.flashTimer = 0.1;
+              this._screenShake(0.25, 5);
+              this.sound.playExplosion();
+              break;
+            }
+          }
+        }
+        this.interceptors = this.interceptors.filter(i => i.alive);
+
+        // 5. Building AABB hit detection (BEFORE explosion collision)
+        for (const m of this.missiles) {
+          if (!m.alive) continue;
+          for (const b of this.buildings) {
+            if (b.destroyed) continue;
+            const bounds = b.getBounds();
+            if (m.x >= bounds.x && m.x <= bounds.x + bounds.width &&
+                m.y >= bounds.y && m.y <= bounds.y + bounds.height) {
+              m.alive = false;
+              const bcx = bounds.x + bounds.width/2;
+              const bcy = bounds.y + bounds.height/2;
+              b.destroy();
+              this.explosions.push(new Explosion(bcx, bcy, 90, 1.0, true));
+              this._spawnDebris(bcx, bcy, 30, ['#ff8800','#ffcc00','#ff4400','#888888']);
+              this._spawnEmbers(bcx, bcy, 10);
+              this._spawnSparks(bcx, bcy, 8);
+              this.flashTimer = 0.08;
+              this._screenShake(0.4, 8);
+              this.sound.playBuildingHit();
+              break;
+            }
+          }
+        }
+
+        // 6. Explosion updates + missile kill detection
+        for (const ex of this.explosions) ex.update(dt);
+        for (const m of this.missiles) {
+          if (!m.alive) continue;
+          for (const ex of this.explosions) {
+            if (!ex.isDone() && !ex.isGround && ex.isColliding(m.x, m.y)) {
+              m.alive = false;
+              this.score += 10;
+              this._spawnDebris(m.x, m.y, 12, ['#ff6644','#ffaa22','#ffffff']);
+              this._spawnSparks(m.x, m.y, 6);
+              this._spawnEmbers(m.x, m.y, 4);
+              break;
+            }
+          }
+        }
+        this.explosions = this.explosions.filter(ex => !ex.isDone());
+
+        // 7. Particles
+        for (const p of this.particles) p.update(dt);
+        this.particles = this.particles.filter(p => !p.isDead());
+
+        // 8. Filter dead missiles (including off-screen)
+        for (const m of this.missiles) {
+          if (m.y > 620 || m.y < -20 || m.x < -20 || m.x > 820) m.alive = false;
+        }
+        this.missiles = this.missiles.filter(m => m.alive);
+
+        // 9. Screen shake transform (CSS transform — NOT ctx.translate)
+        if (this.shakeTimer > 0) {
+          const dx = (Math.random()-0.5)*2 * this.shakeMag;
+          const dy = (Math.random()-0.5)*2 * this.shakeMag;
+          this.canvas.style.transform = `translate(${dx}px,${dy}px)`;
+        } else {
+          this.canvas.style.transform = '';
+        }
+
+        // 10. Game-over detection FIRST: all buildings destroyed
+        if (this.buildings.filter(b => !b.destroyed).length === 0) {
+          this.state = 'game_over';
+          this.sound.playGameOver();
+          this.canvas.style.transform = '';
+          return;
+        }
+
+        // 11. Wave-completion detection: all spawned AND no alive missiles remain
+        if (this.missilesSpawnedThisWave >= this.totalMissilesThisWave && this.missiles.length === 0 && this.state === 'playing') {
+          this._endWave();
+        }
+      }
+
+      draw() {
+        const ctx = this.ctx;
+        // Sky gradient background
+        const skyGrad = ctx.createLinearGradient(0, 0, 0, 600);
+        skyGrad.addColorStop(0, '#050510');
+        skyGrad.addColorStop(0.6, '#0a0a2a');
+        skyGrad.addColorStop(0.85, '#12082a');
+        skyGrad.addColorStop(1, '#1a1030');
+        ctx.fillStyle = skyGrad;
+        ctx.fillRect(0, 0, 800, 600);
+        for (const star of this.stars) star.draw(ctx);
+        // Ground strip
+        ctx.fillStyle = '#1a1410';
+        ctx.fillRect(0, 588, 800, 12);
+        ctx.fillStyle = '#2a2218';
+        ctx.fillRect(0, 588, 800, 2);
+
+        if (this.state === 'start') {
+          this._drawStartScreen(ctx);
+          return;
+        }
+
+        if (this.state === 'game_over') {
+          // Draw buildings (destroyed state) beneath overlay
+          for (const building of this.buildings) building.draw(ctx);
+          this._drawGameOverScreen(ctx);
+          return;
+        }
+
+        // === PLAYING and INTERLUDE share the gameplay scene ===
+        for (const building of this.buildings) building.draw(ctx);
+
+        // === IRON DOME LAUNCHER ===
+        const baseX = 400, baseY = 588;
+
+        // Truck body
+        ctx.fillStyle = '#3a4a2a';
+        ctx.fillRect(baseX - 24, baseY - 4, 48, 10);
+        // Cab
+        ctx.fillStyle = '#2d3d1d';
+        ctx.fillRect(baseX - 28, baseY - 6, 10, 12);
+        // Cab window
+        ctx.fillStyle = '#556';
+        ctx.fillRect(baseX - 27, baseY - 4, 6, 4);
+        // Undercarriage
+        ctx.fillStyle = '#2a3a1a';
+        ctx.fillRect(baseX - 22, baseY + 6, 44, 4);
+        // Wheels
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(baseX - 20, baseY + 6, 8, 5);
+        ctx.fillRect(baseX - 4, baseY + 6, 8, 5);
+        ctx.fillRect(baseX + 12, baseY + 6, 8, 5);
+        ctx.fillStyle = '#444';
+        ctx.fillRect(baseX - 18, baseY + 8, 4, 2);
+        ctx.fillRect(baseX - 2, baseY + 8, 4, 2);
+        ctx.fillRect(baseX + 14, baseY + 8, 4, 2);
+
+        // Radar dish mast
+        ctx.fillStyle = '#556655';
+        ctx.fillRect(baseX + 17, baseY - 16, 2, 12);
+        ctx.strokeStyle = '#88bb88';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(baseX + 18, baseY - 18, 5, Math.PI * 0.6, Math.PI * 1.8);
+        ctx.stroke();
+        ctx.fillStyle = '#aaddaa';
+        ctx.fillRect(baseX + 17, baseY - 19, 2, 2);
+
+        // Launcher mount platform
+        ctx.fillStyle = '#4a5a3a';
+        ctx.fillRect(baseX - 8, baseY - 8, 16, 6);
+
+        // Launcher tubes (rotate toward mouse)
+        const aimAngle = Math.atan2(this.mouseY - (baseY - 6), this.mouseX - baseX);
+        const clampedAngle = Math.max(-Math.PI * 0.92, Math.min(-Math.PI * 0.08, aimAngle));
+
+        ctx.save();
+        ctx.translate(baseX, baseY - 6);
+        ctx.rotate(clampedAngle);
+
+        for (let i = -1; i <= 1; i++) {
+          const ty = i * 4;
+          ctx.fillStyle = '#5a6a4a';
+          ctx.fillRect(0, ty - 2, 24, 4);
+          ctx.fillStyle = '#222';
+          ctx.fillRect(22, ty - 1.5, 3, 3);
+          ctx.fillStyle = '#7a8a6a';
+          ctx.fillRect(1, ty - 2, 21, 1);
+        }
+        // Mount bracket
+        ctx.fillStyle = '#4a5a3a';
+        ctx.fillRect(-3, -7, 6, 14);
+
+        ctx.restore();
+
+        // Draw entity layers
+        for (const m of this.missiles) m.draw(ctx);
+        for (const ic of this.interceptors) ic.draw(ctx);
+        for (const ex of this.explosions) ex.draw(ctx);
+        for (const p of this.particles) p.draw(ctx);
+
+        // HUD
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '16px monospace';
+        ctx.fillText(`SCORE: ${this.score}`, 10, 20);
+        ctx.fillText(`BUILDINGS: ${this.buildings.filter(b=>!b.destroyed).length}`, 10, 40);
+        ctx.fillText(`WAVE: ${this.wave}`, 680, 20);
+
+        // Screen flash effect
+        if (this.flashTimer > 0) {
+          ctx.save();
+          ctx.globalAlpha = Math.min(1, this.flashTimer * 6);
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, 800, 600);
+          ctx.restore();
+        }
+
+        if (this.state === 'interlude') {
+          this._drawInterlude(ctx);
+        }
+      }
+
+      _handleClick(e) {
+        if (this.state === 'start') {
+          this._resetGame();
+          this.state = 'playing';
+          this._startWave(1);
+          return;
+        }
+
+        if (this.state === 'game_over') {
+          this._resetGame();
+          this.state = 'start';
+          return;
+        }
+
+        if (this.state === 'interlude') return; // ignore clicks during interlude
+
+        // state === 'playing' — existing interceptor launch logic
+        const activeCount = this.interceptors.filter(i => i.alive).length
+                          + this.explosions.filter(ex => !ex.isGround && !ex.isDone()).length;
+        if (activeCount >= 3) return;
+        const rect = this.canvas.getBoundingClientRect();
+        const gx = (e.clientX - rect.left) * (800 / rect.width);
+        const gy = (e.clientY - rect.top)  * (600 / rect.height);
+        this.interceptors.push(new Interceptor(400, 588, gx, gy));
+        this._spawnLaunchSmoke();
+        this.sound.playLaunch();
+      }
+
+      _drawStartScreen(ctx) {
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 40px monospace';
+        ctx.fillText('IRON DOME', 400, 260);
+        ctx.font = '20px monospace';
+        ctx.fillStyle = '#cccccc';
+        ctx.fillText('Click to Start', 400, 310);
+        ctx.fillStyle = '#999999';
+        ctx.font = '14px monospace';
+        ctx.fillText('Tap to play on mobile', 400, 340);
+        ctx.restore();
+      }
+
+      _drawGameOverScreen(ctx) {
+        // Semi-transparent dark overlay
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(0, 0, 800, 600);
+        ctx.save();
+        ctx.textAlign = 'center';
+        // Red 'GAME OVER'
+        ctx.fillStyle = '#ff3333';
+        ctx.font = 'bold 48px monospace';
+        ctx.fillText('GAME OVER', 400, 250);
+        // White final score
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '24px monospace';
+        ctx.fillText(`FINAL SCORE: ${this.score}`, 400, 310);
+        // Restart prompt
+        ctx.fillStyle = '#cccccc';
+        ctx.font = '18px monospace';
+        ctx.fillText('Click to Restart', 400, 370);
+        ctx.restore();
+      }
+
+      _drawInterlude(ctx) {
+        // Semi-transparent overlay
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(0, 0, 800, 600);
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#00ff88';
+        ctx.font = 'bold 36px monospace';
+        ctx.fillText(`WAVE ${this.wave} COMPLETE`, 400, 240);
+        if (this.interludeBonusAwarded && this.interludeBonus > 0) {
+          ctx.fillStyle = '#ffdd44';
+          ctx.font = 'bold 24px monospace';
+          ctx.fillText(`+${this.interludeBonus} BUILDING BONUS`, 400, 290);
+        }
+        ctx.fillStyle = '#cccccc';
+        ctx.font = '18px monospace';
+        ctx.fillText(`Next wave in ${Math.ceil(this.interludeTimer)}...`, 400, 340);
+        ctx.restore();
+      }
+
+      _startWave(n) {
+        this.wave = n;
+        this.totalMissilesThisWave = 3 + n * 2;       // wave 1 = 5, wave 5 = 13
+        this.missilesSpawnedThisWave = 0;
+        this.spawnInterval = Math.max(0.6, 2.2 - n * 0.2); // wave 1 = 2.0s, wave 5 = 1.2s
+        this.spawnTimer = 0;
+      }
+
+      _endWave() {
+        this.state = 'interlude';
+        this.sound.playWaveComplete();
+        this.interludeTimer = 2.5;
+        const alive = this.buildings.filter(b => !b.destroyed).length;
+        this.interludeBonus = alive * 100;
+        this.score += this.interludeBonus;
+        this.interludeBonusAwarded = true;
+      }
+
+      _resetGame() {
+        this.buildings = [];
+        this._initBuildings();
+        this.score = 0;
+        this.interceptors = [];
+        this.missiles = [];
+        this.explosions = [];
+        this.particles = [];
+        this.spawnTimer = 0;
+        this.shakeTimer = 0;
+        this.shakeMag = 0;
+        this.wave = 0;
+        this.missilesSpawnedThisWave = 0;
+        this.totalMissilesThisWave = 0;
+        this.interludeTimer = 0;
+        this.interludeBonusAwarded = false;
+        this.interludeBonus = 0;
+        this.flashTimer = 0;
+        this.canvas.style.transform = '';
+      }
+
+      _spawnMissile() {
+        const sx = 20 + Math.random() * 760;
+        const alive = this.buildings.filter(b => !b.destroyed);
+        const target = alive.length > 0 ? alive[Math.floor(Math.random() * alive.length)] : null;
+        const tx = target ? target.x + target.width/2 : Math.random()*800;
+        const ty = target ? target.y + target.height/2 : 590;
+        const speed = (80 + Math.random() * 40) * (1 + this.wave * 0.12);
+        this.missiles.push(new Missile(sx, 0, tx, ty, speed));
+        this.missilesSpawnedThisWave++;
+      }
+
+      _spawnDebris(cx, cy, count, colors) {
+        for (let i = 0; i < count && this.particles.length < 300; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 40 + Math.random() * 120;
+          const color = colors[Math.floor(Math.random() * colors.length)];
+          const size = 1 + Math.floor(Math.random() * 3);
+          this.particles.push(new Particle(
+            cx, cy,
+            Math.cos(angle)*speed, Math.sin(angle)*speed - 60,
+            color, 0.6 + Math.random()*0.8, size
+          ));
+        }
+      }
+
+      _spawnEmbers(cx, cy, count) {
+        for (let i = 0; i < count && this.particles.length < 300; i++) {
+          const angle = -Math.PI / 2 + (Math.random() - 0.5) * 1.2;
+          const speed = 15 + Math.random() * 40;
+          const p = new Particle(
+            cx + (Math.random() - 0.5) * 20, cy,
+            Math.cos(angle) * speed, Math.sin(angle) * speed - 20,
+            Math.random() < 0.5 ? '#ff8844' : '#ffaa22',
+            1.5 + Math.random() * 2.0, 1
+          );
+          p.gravity = -20;
+          this.particles.push(p);
+        }
+      }
+
+      _spawnSparks(cx, cy, count) {
+        for (let i = 0; i < count && this.particles.length < 300; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 150 + Math.random() * 200;
+          this.particles.push(new Particle(
+            cx, cy,
+            Math.cos(angle) * speed, Math.sin(angle) * speed,
+            '#ffffff', 0.15 + Math.random() * 0.2, 1
+          ));
+        }
+      }
+
+      _spawnLaunchSmoke() {
+        for (let i = 0; i < 10 && this.particles.length < 300; i++) {
+          const angle = -Math.PI / 2 + (Math.random() - 0.5) * 2.0;
+          const speed = 20 + Math.random() * 50;
+          const p = new Particle(
+            400 + (Math.random() - 0.5) * 16, 588,
+            Math.cos(angle) * speed, Math.sin(angle) * speed * 0.5 + 30,
+            Math.random() < 0.5 ? '#888888' : '#aaaaaa',
+            0.4 + Math.random() * 0.6, 3 + Math.floor(Math.random() * 3)
+          );
+          p.gravity = -30;
+          this.particles.push(p);
+        }
+      }
+
+      _screenShake(duration, magnitude) {
+        this.shakeTimer = duration;
+        this.shakeMag = magnitude;
+      }
+
+      _initStars() {
+        for (let i = 0; i < 120; i++) {
+          this.stars.push(new Star(this.canvas));
+        }
+      }
+
+      _initBuildings() {
+        const heights = [80, 60, 90, 70, 100, 65];
+        for (let i = 0; i < 6; i++) {
+          const x = 40 + i * (720 / 5);
+          const h = heights[i];
+          const y = 600 - h - 10;
+          this.buildings.push(new Building(x, y, 64, h));
+        }
+      }
+
+      _resizeContainer() {
+        const container = document.getElementById('game-container');
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const scale = Math.min(vw / 800, vh / 600);
+        const w = Math.floor(800 * scale);
+        const h = Math.floor(600 * scale);
+        container.style.width = w + 'px';
+        container.style.height = h + 'px';
+      }
+    }
+
+    window.addEventListener('load', () => new Game());
+  </script>
+</body>
+</html>
