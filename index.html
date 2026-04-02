@@ -278,6 +278,16 @@
         this._initStars();
         this._initBuildings();
 
+        this.score = 0;
+        this.interceptors = [];
+        this.missiles = [];
+        this.explosions = [];
+        this.particles = [];
+        this.shakeTimer = 0;
+        this.shakeMag = 0;
+        this.spawnTimer = 0;
+        this.spawnInterval = 2.2;  // instance property (not const) so S03 can mutate per-wave
+
         this.canvas.addEventListener('click', e => this._handleClick(e));
 
         requestAnimationFrame(t => this._loop(t));
@@ -294,6 +304,79 @@
       update(dt) {
         for (const star of this.stars) star.update(dt);
         for (const building of this.buildings) building.update(dt);
+
+        // 1. Decay shake
+        this.shakeTimer = Math.max(0, this.shakeTimer - dt);
+
+        // 2. Update interceptors, collect detonations
+        for (const ic of this.interceptors) {
+          if (!ic.alive) continue;
+          const result = ic.update(dt);
+          if (result.detonated) {
+            this.explosions.push(new Explosion(result.cx, result.cy, 60, 1.8, false));
+          }
+        }
+        this.interceptors = this.interceptors.filter(i => i.alive);
+
+        // 3. Missile spawner
+        this.spawnTimer += dt;
+        if (this.spawnTimer >= this.spawnInterval) {
+          this.spawnTimer = 0;
+          this._spawnMissile();
+        }
+
+        // 4. Update missiles
+        for (const m of this.missiles) m.update(dt);
+
+        // 5. Building AABB hit detection (BEFORE explosion collision)
+        for (const m of this.missiles) {
+          if (!m.alive) continue;
+          for (const b of this.buildings) {
+            if (b.destroyed) continue;
+            const bounds = b.getBounds();
+            if (m.x >= bounds.x && m.x <= bounds.x + bounds.width &&
+                m.y >= bounds.y && m.y <= bounds.y + bounds.height) {
+              m.alive = false;
+              const bcx = bounds.x + bounds.width/2;
+              const bcy = bounds.y + bounds.height/2;
+              b.destroy();
+              this.explosions.push(new Explosion(bcx, bcy, 90, 1.0, true));
+              this._spawnDebris(bcx, bcy, 20, ['#ff8800','#ffcc00','#ff4400','#888888']);
+              this._screenShake(0.4, 8);
+              break;
+            }
+          }
+        }
+
+        // 6. Explosion updates + missile kill detection
+        for (const ex of this.explosions) ex.update(dt);
+        for (const m of this.missiles) {
+          if (!m.alive) continue;
+          for (const ex of this.explosions) {
+            if (!ex.isDone() && !ex.isGround && ex.isColliding(m.x, m.y)) {
+              m.alive = false;
+              this.score += 10;
+              break;
+            }
+          }
+        }
+        this.explosions = this.explosions.filter(ex => !ex.isDone());
+
+        // 7. Particles
+        for (const p of this.particles) p.update(dt);
+        this.particles = this.particles.filter(p => !p.isDead());
+
+        // 8. Filter dead missiles
+        this.missiles = this.missiles.filter(m => m.alive);
+
+        // 9. Screen shake transform (CSS transform — NOT ctx.translate)
+        if (this.shakeTimer > 0) {
+          const dx = (Math.random()-0.5)*2 * this.shakeMag;
+          const dy = (Math.random()-0.5)*2 * this.shakeMag;
+          this.canvas.style.transform = `translate(${dx}px,${dy}px)`;
+        } else {
+          this.canvas.style.transform = '';
+        }
       }
 
       draw() {
@@ -302,10 +385,65 @@
         ctx.fillRect(0, 0, 800, 600);
         for (const star of this.stars) star.draw(ctx);
         for (const building of this.buildings) building.draw(ctx);
+
+        // Launch base: cyan triangle at (400, 590)
+        ctx.fillStyle = '#00ffff';
+        ctx.beginPath();
+        ctx.moveTo(400, 582);
+        ctx.lineTo(394, 598);
+        ctx.lineTo(406, 598);
+        ctx.closePath();
+        ctx.fill();
+
+        // Draw entity layers
+        for (const m of this.missiles) m.draw(ctx);
+        for (const ic of this.interceptors) ic.draw(ctx);
+        for (const ex of this.explosions) ex.draw(ctx);
+        for (const p of this.particles) p.draw(ctx);
+
+        // HUD
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '16px monospace';
+        ctx.fillText(`SCORE: ${this.score}`, 10, 20);
+        ctx.fillText(`BUILDINGS: ${this.buildings.filter(b=>!b.destroyed).length}`, 10, 40);
       }
 
       _handleClick(e) {
-        // S02 will fill this
+        const activeCount = this.interceptors.filter(i => i.alive).length
+                          + this.explosions.filter(ex => !ex.isGround && !ex.isDone()).length;
+        if (activeCount >= 3) return;
+        const rect = this.canvas.getBoundingClientRect();
+        const gx = (e.clientX - rect.left) * (800 / rect.width);
+        const gy = (e.clientY - rect.top)  * (600 / rect.height);
+        this.interceptors.push(new Interceptor(400, 590, gx, gy));
+      }
+
+      _spawnMissile() {
+        const sx = 20 + Math.random() * 760;
+        const alive = this.buildings.filter(b => !b.destroyed);
+        const target = alive.length > 0 ? alive[Math.floor(Math.random() * alive.length)] : null;
+        const tx = target ? target.x + target.width/2 : Math.random()*800;
+        const ty = target ? target.y + target.height/2 : 590;
+        const speed = 80 + Math.random() * 40;  // 80-120 px/s for wave 1
+        this.missiles.push(new Missile(sx, 0, tx, ty, speed));
+      }
+
+      _spawnDebris(cx, cy, count, colors) {
+        for (let i = 0; i < count && this.particles.length < 200; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 40 + Math.random() * 120;
+          const color = colors[Math.floor(Math.random() * colors.length)];
+          this.particles.push(new Particle(
+            cx, cy,
+            Math.cos(angle)*speed, Math.sin(angle)*speed - 60,
+            color, 0.6 + Math.random()*0.8
+          ));
+        }
+      }
+
+      _screenShake(duration, magnitude) {
+        this.shakeTimer = duration;
+        this.shakeMag = magnitude;
       }
 
       _initStars() {
