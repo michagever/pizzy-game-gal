@@ -126,6 +126,142 @@
       }
     }
 
+    // === MISSILE CLASS ===
+
+    class Missile {
+      constructor(x, y, tx, ty, speed) {
+        this.x = x; this.y = y;
+        const dist = Math.hypot(tx - x, ty - y);
+        this.vx = (tx - x) / dist * speed;
+        this.vy = (ty - y) / dist * speed;
+        this.trail = [];   // last ~8 positions [{x,y}]
+        this.alive = true;
+      }
+      update(dt) {
+        this.trail.push({x: this.x, y: this.y});
+        if (this.trail.length > 8) this.trail.shift();
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+      }
+      draw(ctx) {
+        // Draw red pixel trail (fading alpha) then 3x3 red head
+        this.trail.forEach((p, i) => {
+          ctx.fillStyle = `rgba(255,60,60,${(i+1)/this.trail.length * 0.7})`;
+          ctx.fillRect(p.x-1, p.y-1, 2, 2);
+        });
+        ctx.fillStyle = '#ff3c3c';
+        ctx.fillRect(this.x-1, this.y-1, 3, 3);
+      }
+    }
+
+    // === INTERCEPTOR CLASS ===
+
+    class Interceptor {
+      constructor(x, y, tx, ty) {
+        this.x = x; this.y = y;
+        this.tx = tx; this.ty = ty;
+        this.speed = 350;  // px/s
+        this.trail = [];
+        this.alive = true;
+      }
+      update(dt) {
+        this.trail.push({x: this.x, y: this.y});
+        if (this.trail.length > 10) this.trail.shift();
+        const dist = Math.hypot(this.tx - this.x, this.ty - this.y);
+        if (dist < this.speed * dt) {
+          // Reached target — detonate
+          this.alive = false;
+          return {detonated: true, cx: this.tx, cy: this.ty};
+        }
+        this.x += (this.tx - this.x) / dist * this.speed * dt;
+        this.y += (this.ty - this.y) / dist * this.speed * dt;
+        return {detonated: false};
+      }
+      draw(ctx) {
+        // Blue/yellow alternating trail
+        this.trail.forEach((p, i) => {
+          ctx.fillStyle = i % 2 === 0
+            ? `rgba(80,160,255,${(i+1)/this.trail.length * 0.8})`
+            : `rgba(255,220,60,${(i+1)/this.trail.length * 0.6})`;
+          ctx.fillRect(p.x-1, p.y-1, 2, 2);
+        });
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(this.x-1, this.y-1, 2, 2);
+      }
+    }
+
+    // === EXPLOSION CLASS ===
+
+    class Explosion {
+      constructor(cx, cy, maxRadius, duration, isGround) {
+        this.cx = cx; this.cy = cy;
+        this.maxRadius = maxRadius;
+        this.duration = duration;
+        this.timer = 0;
+        this.isGround = isGround;
+      }
+      get radius() {
+        return this.maxRadius * Math.min(this.timer / (this.duration * 0.4), 1);
+      }
+      get alpha() {
+        return Math.max(0, 1 - this.timer / this.duration);
+      }
+      isColliding(x, y) {
+        return Math.hypot(x - this.cx, y - this.cy) <= this.radius;
+      }
+      isDone() { return this.timer >= this.duration; }
+      update(dt) { this.timer += dt; }
+      draw(ctx) {
+        if (this.alpha <= 0) return;
+        ctx.save();
+        ctx.globalAlpha = this.alpha;
+        // Outer ring
+        ctx.strokeStyle = this.isGround ? '#ff8800' : '#ffff44';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(this.cx, this.cy, this.radius, 0, Math.PI * 2);
+        ctx.stroke();
+        // Inner fill
+        const grad = ctx.createRadialGradient(
+          this.cx, this.cy, 0, this.cx, this.cy, this.radius
+        );
+        grad.addColorStop(0, this.isGround ? 'rgba(255,80,0,0.6)' : 'rgba(255,255,100,0.4)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(this.cx, this.cy, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    // === PARTICLE CLASS ===
+
+    class Particle {
+      constructor(x, y, vx, vy, color, life) {
+        this.x = x; this.y = y;
+        this.vx = vx; this.vy = vy;
+        this.color = color;
+        this.life = life;
+        this.maxLife = life;
+      }
+      isDead() { return this.life <= 0; }
+      update(dt) {
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.vy += 150 * dt;  // gravity
+        this.life -= dt;
+      }
+      draw(ctx) {
+        if (this.life <= 0) return;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, this.life / this.maxLife);
+        ctx.fillStyle = this.color;
+        ctx.fillRect(this.x-1, this.y-1, 2, 2);
+        ctx.restore();
+      }
+    }
+
     // === GAME CLASS ===
 
     class Game {
