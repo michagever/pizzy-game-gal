@@ -805,6 +805,29 @@
         // 4. Update missiles
         for (const m of this.missiles) m.update(dt);
 
+        // 4b. Direct-hit detection: interceptor physically hits a missile
+        for (const ic of this.interceptors) {
+          if (!ic.alive) continue;
+          for (const m of this.missiles) {
+            if (!m.alive) continue;
+            if (Math.hypot(ic.x - m.x, ic.y - m.y) < 14) {
+              ic.alive = false;
+              m.alive = false;
+              this.score += 25;
+              // Large special explosion
+              this.explosions.push(new Explosion(m.x, m.y, 90, 2.2, false));
+              this._spawnDebris(m.x, m.y, 24, ['#ffffff','#ffff44','#ff8800','#88ccff']);
+              this._spawnSparks(m.x, m.y, 14);
+              this._spawnEmbers(m.x, m.y, 8);
+              this.flashTimer = 0.1;
+              this._screenShake(0.25, 5);
+              this.sound.playExplosion();
+              break;
+            }
+          }
+        }
+        this.interceptors = this.interceptors.filter(i => i.alive);
+
         // 5. Building AABB hit detection (BEFORE explosion collision)
         for (const m of this.missiles) {
           if (!m.alive) continue;
